@@ -143,8 +143,6 @@ def create_new_block(id_num, chn_names):
 app = Dash(prevent_initial_callbacks="initial_duplicate")
 
 add_figure_btn = html.Button('Add Figure', id='add-figure-btn', n_clicks=0)
-chn_selector = dcc.Dropdown(id={'type': 'chn_selector', 'index': -1},options=[], placeholder="Select a channel", multi=True)
-plotted_data = dcc.Graph(id={'type': 'data_plotter', 'index': -1},figure=create_default_figure(), mathjax=True)
 file_uploader = dcc.Upload(
         id='upload-data',
         children=html.Div([
@@ -171,10 +169,8 @@ latest_file_uploader = html.Div([
     html.Button('Load Latest File', id='load-latest-file-btn', n_clicks=0, style={'display': 'inline-block'})
 ])
 msg = html.Div()
-storage = dcc.Store(id='storage', storage_type='memory')
-chns_storage = dcc.Store(id={'type': 'chns_storage', 'index': -1}, storage_type='memory')
+storage = dcc.Store(id='storage', storage_type='memory') # TODO Rename
 figure_container = html.Div(id='figure-container', children=[])
-figure_info = html.Pre(id={'type': 'figure_info', 'index': -1}, children='Click on a point for more information', style={'whiteSpace': 'pre_wrap'})
 
 # App layout
 app.layout = [
@@ -183,13 +179,9 @@ app.layout = [
     uploaded_file,
     latest_file_uploader,
     add_figure_btn,
-    chn_selector,
-    plotted_data,
-    figure_info,
     figure_container,
     msg,
-    storage,
-    chns_storage
+    storage
 ]
 
 @callback(
@@ -197,7 +189,7 @@ app.layout = [
     Input(add_figure_btn, 'n_clicks')
 )
 def add_figure(n_clicks):
-    if n_clicks > 0:
+    if n_clicks >= 0:
         block = Patch()
         block.append(create_new_block(n_clicks, []))
         return block
