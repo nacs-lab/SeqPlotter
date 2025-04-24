@@ -112,12 +112,16 @@ def create_default_figure():
         title="",
         xaxis=dict(
             title="Time (ms)",
+            rangeslider=dict(visible=True,
+                             yaxis = dict(rangemode='auto'))
         ),
         yaxis=dict(
             title="Value",
+            fixedrange=False
         ),
         yaxis2=dict(
-            title="Frequency (Hz)"
+            title="Frequency (Hz)",
+            fixedrange=False
         ),
         legend_title="Legend",
         font=dict(size=14)
@@ -134,6 +138,12 @@ def create_new_block(id_num, chn_names):
             multi=True
         ),
         dcc.Graph(id={'type': 'data_plotter', 'index': id_num}, figure=create_default_figure(), mathjax=True),
+        #html.Div([
+        #    html.Div("Min X: ", style={'display': 'inline-block', 'margin-right': '10px'}),
+        #    dcc.Input(id={'type': 'min_X', 'index': id_num}, type='number', value='', style={'display': 'inline-block', 'width': '10%'}, debounce=True),
+        #    html.Div("Max X: ", style={'display': 'inline-block', 'margin-right': '10px'}),
+        #    dcc.Input(id={'type': 'max_X', 'index': id_num}, type='number', value='', style={'display': 'inline-block', 'width': '10%'}, debounce=True)
+        #]),
         html.Pre(id={'type': 'figure_info', 'index': id_num}, children='Click on a point for more information', style={'whiteSpace': 'pre_wrap'}),
         dcc.Store(id={'type': 'chns_storage', 'index': id_num}, storage_type='memory')
     ])
