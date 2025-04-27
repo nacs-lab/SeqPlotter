@@ -7,6 +7,7 @@ import struct
 import plotly.express as px
 import base64
 import plotly.graph_objs as go
+import dash_bootstrap_components as dbc
 from pathlib import Path
 
 def get_latest_file(directory, extension):
@@ -16,6 +17,21 @@ def get_latest_file(directory, extension):
         return None
     latest_file = max(files, key=lambda f: f.stat().st_mtime)
     return latest_file
+
+def dict_to_dash_elem(d, spacing=0):
+    res = []
+    indent = 20 * spacing  # Indentation for nested elements
+    indent_str = str(int(indent)) + 'px'
+    for key, value in d.items():
+        if isinstance(value, dict):
+            new_child = [html.Summary(key + " :", style={"paddingLeft": indent_str})]
+            new_child.extend(dict_to_dash_elem(value, spacing + 1))
+            new_elem = html.Details(children=new_child)
+            res.append(new_elem)
+        else:
+            new_child = [html.Div([html.Strong(key), ' : ' + str(value), html.Br()], style={"paddingLeft": indent_str})]
+            res.extend(new_child)
+    return res
 
 def process_data(bytes_data):
     #Dump output to file in the following format
@@ -195,21 +211,25 @@ def create_new_block(id_num, chn_names, title, seq_name):
         #    html.Div("Max X: ", style={'display': 'inline-block', 'margin-right': '10px'}),
         #    dcc.Input(id={'type': 'max_X', 'index': id_num}, type='number', value='', style={'display': 'inline-block', 'width': '10%'}, debounce=True)
         #]),
-        html.Pre(id={'type': 'figure_info', 'index': id_num}, children='Click on a point for more information', style={'whiteSpace': 'pre_wrap'}),
+        dbc.Row([
+            dbc.Col(html.Pre(id={'type': 'figure_info', 'index': id_num}, children='Click on a point for more information', style={'whiteSpace': 'pre_wrap'})),
+            dbc.Col(html.Pre(id={'type': 'figure_info2', 'index': id_num}, children='Click on a point for more information2', style={'whiteSpace': 'pre_wrap'}))
+        ]
+        ),
         dcc.Store(id={'type': 'chns_storage', 'index': id_num}, storage_type='memory'),
         dcc.Store(id={'type': 'seq_name', 'index': id_num}, data=seq_name, storage_type='memory')
     ])
 
 
 # Initialize the app
-app = Dash(prevent_initial_callbacks="initial_duplicate")
+app = Dash(prevent_initial_callbacks="initial_duplicate", external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 add_figure_elem = html.Div([dcc.Dropdown(
             id='sequence_selector',
             options=[],
             placeholder="Select a sequence"
             ),
-            html.Button('Add Figure for this Sequence', id='add-figure-btn', n_clicks=0)])
+            dbc.Button('Add Figure for this Sequence', id='add-figure-btn', n_clicks=0, color="primary", className="mb-3 mt-3"),])
 file_uploader = dcc.Upload(
         id='upload-data',
         children=html.Div([
@@ -240,29 +260,28 @@ seq_cache = dcc.Store(id='seq_cache', storage_type='memory')
 figure_container = html.Div(id='figure-container', children=[])
 #reset_block_signal = dcc.Store(id='reset_block_signal', data=0, storage_type='memory') # Used to reset blocks
 
-test_dict = {}
-test_dict['a'] = dict()
-test_dict['b'] = [4,6,8]
-test_dict['a']['b'] = dict()
-test_dict['a']['b']['c'] = 3.14159
-test_dict['a']['c'] = 7.589e-6
-# print(dict_to_dash_elem(test_dict))
+# test_dict = {}
+# test_dict['a'] = dict()
+# test_dict['b'] = [4,6,8]
+# test_dict['a']['b'] = dict()
+# test_dict['a']['b']['c'] = 3.14159
+# test_dict['a']['c'] = 7.589e-6
+# # print(dict_to_dash_elem(test_dict))
 
-# test_elem = html.Div(id='test_elem', children=dict_to_dash_elem(test_dict))
-test_elem = html.Div(children=dict_to_dash_elem(test_dict))
+# # test_elem = html.Div(id='test_elem', children=dict_to_dash_elem(test_dict))
+# test_elem = html.Div(children=dict_to_dash_elem(test_dict))
 
 # App layout
-app.layout = [
-    html.Pre('My First App with Data\n', style={'whiteSpace': 'pre_wrap'}),
-    test_elem,
-    file_uploader,
-    uploaded_file,
-    latest_file_uploader,
-    add_figure_elem,
-    figure_container,
+app.layout = dbc.Container([
+    dbc.Row([html.Pre('My First App with Data\n', style={'whiteSpace': 'pre_wrap'})]),
+    dbc.Row([file_uploader]),
+    dbc.Row([uploaded_file]),
+    dbc.Row([latest_file_uploader]),
+    dbc.Row([add_figure_elem]),
+    dbc.Row([figure_container]),
     msg,
     seq_cache
-]
+])
 
 @callback(
     Output(figure_container, 'children', allow_duplicate=True),
