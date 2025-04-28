@@ -8,6 +8,7 @@ import plotly.express as px
 import base64
 import plotly.graph_objs as go
 import dash_bootstrap_components as dbc
+import json
 from pathlib import Path
 
 def get_latest_file(directory, extension):
@@ -18,20 +19,58 @@ def get_latest_file(directory, extension):
     latest_file = max(files, key=lambda f: f.stat().st_mtime)
     return latest_file
 
-def dict_to_dash_elem(d, spacing=0):
+def dict_to_dash_elem(d, spacing=0, id=0, fig_id=0):
     res = []
     indent = 20 * spacing  # Indentation for nested elements
     indent_str = str(int(indent)) + 'px'
+    colors = []
     for key, value in d.items():
-        if isinstance(value, dict):
-            new_child = [html.Summary(key + " :", style={"paddingLeft": indent_str})]
-            new_child.extend(dict_to_dash_elem(value, spacing + 1))
+        if isinstance(value, dict) and ('value' not in value):
+            elem, id, int_colors = dict_to_dash_elem(value, spacing + 1, id, fig_id)
+            color = None
+            if "red" in int_colors:
+                color = 'red'
+                new_child = [html.Summary(html.Strong([key + " :"], style={'color': color}), id={'type': 'modified_value_sum', 'index': id, 'fig_id': fig_id}, style={"paddingLeft": indent_str})]
+            elif "blue" in int_colors:
+                color = 'blue'
+                new_child = [html.Summary(html.Strong([key + " :"], style={'color': color}), id={'type': 'config_value_sum', 'index': id, 'fig_id': fig_id}, style={"paddingLeft": indent_str})]
+            else:
+                new_child = [html.Summary(key + " :", id={'type': 'default_value_sum', 'index': id, 'fig_id': fig_id}, style={"paddingLeft": indent_str})]
+            id = id + 1
+            new_child.extend(elem)
             new_elem = html.Details(children=new_child)
             res.append(new_elem)
+            colors.append(color)
         else:
-            new_child = [html.Div([html.Strong(key), ' : ' + str(value), html.Br()], style={"paddingLeft": indent_str})]
+            color = None
+            if value['type'] == 1:
+                if value['value'] != value['config_value']:
+                    new_child = [html.Div([html.Strong(key, style={'color': 'red'}), ' : ', html.Span([str(value['config_value'])], style={'color': 'blue'}), html.Strong(['\u21D2', str(value['value'])], style={'color': 'red'}), html.Br()],
+                                          id={'type': 'modified_value', 'index': id, 'fig_id': fig_id}, style={"paddingLeft": indent_str})]
+                    color = 'red'
+                else:
+                    # From config
+                    new_child = [html.Div([html.Strong(key, style={'color': 'blue'}), ' : ' + str(value['value']), html.Br()],
+                                          id={'type': 'config_value', 'index': id, 'fig_id': fig_id}, style={"paddingLeft": indent_str})]
+                    color = 'blue'
+            elif value['type'] == 2 and (value['value'] != value['old_value']):
+                # Overwritten non-config value
+                new_child = [html.Div([html.Strong(key, style={'color': 'red'}), ' : ' + str(value['old_value']), html.Strong(['\u21D2', str(value['value'])], style={'color': 'red'}), html.Br()],
+                                          id={'type': 'modified_value', 'index': id, 'fig_id': fig_id}, style={"paddingLeft": indent_str})]
+                color = 'red'
+            elif value['type'] == 3:
+                # Overwritten config value
+                new_child = [html.Div([html.Strong(key, style={'color': 'red'}), ' : ', html.Span([str(value['config_value'])], style={'color': 'blue'}), html.Strong(['\u21D2', str(value['old_value'])]), html.Strong(['\u21D2', str(value['value'])], style={'color': 'red'}), html.Br()],
+                                          id={'type': 'modified_value', 'index': id, 'fig_id': fig_id}, style={"paddingLeft": indent_str})]
+                color = 'red'
+            else:
+                # Non-config default value taken
+                new_child = [html.Div([html.Strong(key), ' : ' + str(value['value']), html.Br()],
+                                      id={'type': 'default_value', 'index': id, 'fig_id': fig_id}, style={"paddingLeft": indent_str})]
+            id = id + 1
             res.extend(new_child)
-    return res
+            colors.append(color)
+    return res, id, colors
 
 def process_data(bytes_data):
     #Dump output to file in the following format
@@ -92,6 +131,16 @@ def process_data(bytes_data):
             chn_info["vals"] = np.array(chn_info["vals"])
             chn_info["ids"] = np.array(chn_info["ids"])
             chn_infos.append(chn_info)
+        has_params = int.from_bytes(fileContent[location:location + 1], byteorder='little')
+        location += 1
+        if has_params:
+            split_array = fileContent[location:].split(b'\x00', 1)
+            json_str = split_array[0].decode('utf-8')
+            location = location + len(split_array[0]) + 1
+            # print(repr(json_str))
+            seq_info['params'] = json.loads(json_str)
+        else:
+            seq_info['params'] = {}
         seq_info['outputs'] = chn_infos
         seq_info['chn_map'] = chn_map
         seq_cache[seq_name] = seq_info
@@ -195,16 +244,20 @@ def create_default_figure(title = ''):
                          showlegend=False))
     return default_figure
 
-def create_new_block(id_num, chn_names, title, seq_name):
+def create_new_block(id_num, chn_names, title, seq_name, params):
     """Create a new block with a figure and channel selector."""
-    return html.Div([
+    if params:
+        param_elem, _, _ = dict_to_dash_elem(params, 0, 0, id_num)
+    else:
+        param_elem = html.Div(children='No parameters loaded.')
+    return [
         dcc.Dropdown(
             id={'type': 'chn_selector', 'index': id_num},
             options=[name for name in chn_names],
             placeholder="Select a channel",
             multi=True
         ),
-        dcc.Graph(id={'type': 'data_plotter', 'index': id_num}, figure=create_default_figure(title), mathjax=True),
+        dcc.Loading(dcc.Graph(id={'type': 'data_plotter', 'index': id_num}, figure=create_default_figure(title), mathjax=True), delay_show=200),
         #html.Div([
         #    html.Div("Min X: ", style={'display': 'inline-block', 'margin-right': '10px'}),
         #    dcc.Input(id={'type': 'min_X', 'index': id_num}, type='number', value='', style={'display': 'inline-block', 'width': '10%'}, debounce=True),
@@ -212,24 +265,41 @@ def create_new_block(id_num, chn_names, title, seq_name):
         #    dcc.Input(id={'type': 'max_X', 'index': id_num}, type='number', value='', style={'display': 'inline-block', 'width': '10%'}, debounce=True)
         #]),
         dbc.Row([
-            dbc.Col(html.Pre(id={'type': 'figure_info', 'index': id_num}, children='Click on a point for more information', style={'whiteSpace': 'pre_wrap'})),
-            dbc.Col(html.Pre(id={'type': 'figure_info2', 'index': id_num}, children='Click on a point for more information2', style={'whiteSpace': 'pre_wrap'}))
+            dbc.Col([html.Pre(id={'type': 'figure_info', 'index': id_num}, children='Click on a point for more information.', style={'whiteSpace': 'pre_wrap'}),
+                    # html.Pre(id={'type': 'add_bt_info', 'index': id_num}, children='', style={'whiteSpace': 'pre_wrap'}),
+                    dcc.Store(id={'type': 'add_bt_info', 'index': id_num}, storage_type='memory'),
+                    dbc.Checklist(options=[{'label': 'Show full backtrace', 'value': 1}], value=[], id={'type': 'show_full_bt', 'index': id_num}, switch=True)
+                    ], width=7),
+            dbc.Col([
+                dbc.Row([
+                    dbc.Col([dbc.Checklist(options = [{'label': 'Show overwritten values', 'value': 1}], value = [1], id={'type': 'overwrite_params_selector', 'fig_id': id_num}, switch=True)]),
+                    dbc.Col([dbc.Checklist(options = [{'label': 'Show config values', 'value': 1}], value = [1], id={'type': 'config_params_selector', 'fig_id': id_num}, switch=True)]),
+                    dbc.Col([dbc.Checklist(options = [{'label': 'Show default values', 'value': 1}], value = [1], id={'type': 'default_params_selector', 'fig_id': id_num}, switch=True)])
+                ]),
+                dbc.Row([dcc.Loading(children=[
+                    html.Div([html.Pre(id={'type': 'figure_info2', 'index': id_num}, children=param_elem, style={'whiteSpace': 'pre_wrap'})          
+                    ]),
+                    html.Div(id={'type': 'dummy-loading-param', 'fig_id': id_num}, children='dummy', style={'display': 'none'})
+                    ], delay_show=200)
+                ], style={'height': '100vh'})]
+            , width=5)
         ]
         ),
         dcc.Store(id={'type': 'chns_storage', 'index': id_num}, storage_type='memory'),
         dcc.Store(id={'type': 'seq_name', 'index': id_num}, data=seq_name, storage_type='memory')
-    ])
+    ]
 
 
 # Initialize the app
 app = Dash(prevent_initial_callbacks="initial_duplicate", external_stylesheets=[dbc.themes.BOOTSTRAP])
 
-add_figure_elem = html.Div([dcc.Dropdown(
+add_figure_elem = [dbc.Col(dcc.Dropdown(
             id='sequence_selector',
             options=[],
-            placeholder="Select a sequence"
-            ),
-            dbc.Button('Add Figure for this Sequence', id='add-figure-btn', n_clicks=0, color="primary", className="mb-3 mt-3"),])
+            placeholder="Select a sequence",
+            className="mb-3 mt-3"
+            )),
+            dbc.Col(dbc.Button('Add Figure for this Sequence', id='add-figure-btn', n_clicks=0, color="primary", className="mb-3 mt-3"))]
 file_uploader = dcc.Upload(
         id='upload-data',
         children=html.Div([
@@ -255,9 +325,8 @@ latest_file_uploader = html.Div([
     dcc.Input(id='file_upload_path', type='text', value='', style={'display': 'inline-block', 'width': '50%'}),
     html.Button('Load Latest File', id='load-latest-file-btn', n_clicks=0, style={'display': 'inline-block'})
 ])
-msg = html.Div()
 seq_cache = dcc.Store(id='seq_cache', storage_type='memory')
-figure_container = html.Div(id='figure-container', children=[])
+figs_container = dcc.Tabs(id='figs-container', value='', children=[])
 #reset_block_signal = dcc.Store(id='reset_block_signal', data=0, storage_type='memory') # Used to reset blocks
 
 # test_dict = {}
@@ -273,18 +342,18 @@ figure_container = html.Div(id='figure-container', children=[])
 
 # App layout
 app.layout = dbc.Container([
-    dbc.Row([html.Pre('My First App with Data\n', style={'whiteSpace': 'pre_wrap'})]),
+    dbc.Row([html.Div('Sequence Plotter', className='text-center display-3 fw-bold')]),
     dbc.Row([file_uploader]),
     dbc.Row([uploaded_file]),
     dbc.Row([latest_file_uploader]),
-    dbc.Row([add_figure_elem]),
-    dbc.Row([figure_container]),
-    msg,
+    dbc.Row(add_figure_elem),
+    dbc.Row(dbc.Col(html.Div([figs_container], style={"height": "100vh", "overflowY": "auto"}))),
     seq_cache
-])
+], fluid=True)
 
 @callback(
-    Output(figure_container, 'children', allow_duplicate=True),
+    Output(figs_container, 'children', allow_duplicate=True),
+    Output(figs_container, 'value'),
     Input('add-figure-btn', 'n_clicks'),
     State('sequence_selector', 'value'),
     State(seq_cache, 'data'),
@@ -292,30 +361,46 @@ app.layout = dbc.Container([
 )
 def add_figure(n_clicks, seq_name, data):
     if data is None:
-        return []
+        return no_update, no_update
     seq_cache = data[0]
     if seq_name not in seq_cache:
-        return []
-    seq_info = seq_cache[seq_name]
-    nchns = len(seq_info['outputs'])
-    chn_names = [seq_info['outputs'][i]["name"] for i in range(nchns)]
+        return no_update, no_update
     if n_clicks > 0:
-        block = Patch()
-        block.append(create_new_block(n_clicks, chn_names, seq_name, seq_name))
-        return block
-    return []
+        seq_info = seq_cache[seq_name]
+        nchns = len(seq_info['outputs'])
+        chn_names = [seq_info['outputs'][i]["name"] for i in range(nchns)]
+        fig_id = f'{seq_name}_{n_clicks}'
+        params = seq_info['params']
+        block = create_new_block(n_clicks, chn_names, seq_name, seq_name, params)
+        patch = Patch()
+        patch.append(dcc.Tab(label=seq_name, id={'type': 'fig_tab', 'index': n_clicks, 'seq': seq_name}, value=fig_id, children=block))
+
+        return patch, fig_id
+    return no_update, no_update
+
+# @callback(
+#     Output(figure_content, 'children', allow_duplicate=True),
+#     Input(figs_container, 'value'),
+#     State(fig_cache, 'data'),
+#     prevent_initial_call=True
+# )
+# def update_figure_content(fig_id, fig_cache):
+#     if fig_cache is None or fig_id is None or fig_id not in fig_cache:
+#         return no_update
+#     return fig_cache[fig_id]
 
 @callback(
     Output(seq_cache, 'data'),
     Output(uploaded_file, 'children'),
-    Output(figure_container, 'children', allow_duplicate=True),
+    Output(figs_container, 'children', allow_duplicate=True),
     Output({'type': 'chns_storage', 'index': ALL}, 'data', allow_duplicate=True),
     Output({'type': 'seq_name', 'index': ALL}, 'data'),
+    Output({'type': 'add_bt_info', 'index': ALL}, 'data', allow_duplicate=True),
     Input(file_uploader, 'contents'),   
     Input(file_uploader, 'filename'),
     Input('load-latest-file-btn', 'n_clicks'),
     State('file_upload_path', 'value'),
-    State(figure_container, 'children'),
+    State(figs_container, 'children'),
     prevent_initial_call=True
 )
 def upload_file(contents, filename, n_clicks, file_path, cur_figs):
@@ -324,23 +409,23 @@ def upload_file(contents, filename, n_clicks, file_path, cur_figs):
     triggered_id = ctx.triggered_id
     if triggered_id == 'upload-data':
         if contents is None:
-            return None, "Please upload a file.", no_update, no_update, no_update
+            return None, "Please upload a file.", no_update, no_update, no_update, no_update
         # strip off the prefix
         content_type, content_string = contents.split(',')
         decoded_bytes = base64.b64decode(content_string)
         res = process_data(decoded_bytes)
         #print(decoded_bytes)
-        return res, "Uploaded: " + filename, [], none_array, none_array
+        return res, "Uploaded: " + filename, [], none_array, none_array, none_array
     if triggered_id == 'load-latest-file-btn':
         fullpath = get_latest_file(file_path, 'seq')
         if fullpath is None:
-            return None, "No file with extension .seq found in the specified directory.", no_update, no_update, no_update
+            return None, "No file with extension .seq found in the specified directory.", no_update, no_update, no_update, no_update
         fullpath = str(fullpath)
         with open(fullpath, 'rb') as f:
             bytes_data = f.read()
         res = process_data(bytes_data)
-        return res, "Loaded latest file: " + fullpath, [], none_array, none_array
-    return None, "Please upload a file.", no_update, no_update, no_update
+        return res, "Loaded latest file: " + fullpath, [], none_array, none_array, none_array
+    return None, "Please upload a file.", no_update, no_update, no_update, no_update
 
 @callback(
     Output('sequence_selector', 'options'),
@@ -440,7 +525,8 @@ def update_graph(selected_channel, seq_cache, chns_storage, seq_name):
 
 @callback(
     Output({'type': 'data_plotter', 'index': MATCH}, 'figure', allow_duplicate=True),
-    Output({'type': 'figure_info', 'index': MATCH}, 'children'),
+    Output({'type': 'figure_info', 'index': MATCH}, 'children', allow_duplicate=True),
+    Output({'type': 'add_bt_info', 'index': MATCH}, 'data', allow_duplicate=True),
     Input({'type': 'data_plotter', 'index': MATCH}, 'clickData'),
     State(seq_cache, 'data'),
     State({'type': 'seq_name', 'index': MATCH}, 'data'),
@@ -448,9 +534,9 @@ def update_graph(selected_channel, seq_cache, chns_storage, seq_name):
 )
 def print_backtrace_info(point, data, seq_name):
     if point is None:
-        return no_update, "Click on a point to see more information."
+        return no_update, "Click on a point to see more information.", ''
     if data is None or (not data[1]):
-        return no_update, "No backtrace info available."
+        return no_update, "No backtrace info available.", ''
     fig = Patch()
     point = point['points']
     x = point[0]['x']
@@ -462,16 +548,19 @@ def print_backtrace_info(point, data, seq_name):
     else:
         fig['data'][0]['yaxis'] = 'y2'
     pulse_id = point[0]['customdata']
-    res = 'Pulse id: ' + str(pulse_id)
+    pulse_id_str = 'Pulse id: ' + str(pulse_id)
     this_bt_idx = data[1]["bt_idxs"][data[2][seq_name]]
     if pulse_id == 2**32 - 1:
-        res = res + " (Default value)\n"
+        first_line = pulse_id_str + " (Default value)\n"
+        other_lines = ''
     elif pulse_id > len(data[1]['bt_infos'][this_bt_idx]['backtraces']) or pulse_id < 0:
-        res = res + " Missing backtrace info\n"
+        first_line = pulse_id_str + " Missing backtrace info\n"
+        other_lines = ''
     else:
         # Get backtrace info
         # bt_info["bt_idxs"]
-        res = res + '\n'
+        pulse_id_str = pulse_id_str + '\n'
+        res = ''
         this_bt = data[1]['bt_infos'][this_bt_idx]['backtraces'][pulse_id]
         nframes = len(this_bt)
         for i in range(nframes):
@@ -484,7 +573,108 @@ def print_backtrace_info(point, data, seq_name):
                 filename = data[1]['bt_infos'][this_bt_idx]['filenames'][filename_id]
                 name = data[1]['bt_infos'][this_bt_idx]['names'][name_id]
                 res = res + f"Frame {i}: {filename}:{name}:{line_num} \n"
-    return fig, res
+        split_arr = res.split('\n', 1)
+        first_line = pulse_id_str + split_arr[0]
+        other_lines = split_arr[1] if len(split_arr) > 1 else ''
+    return fig, first_line, [first_line, other_lines]
+
+@callback(
+    Output({'type': 'figure_info', 'index': MATCH}, 'children', allow_duplicate=True),
+    Input({'type': 'show_full_bt', 'index': MATCH}, 'value'),
+    Input({'type': 'add_bt_info', 'index': MATCH}, 'data'),
+    prevent_initial_call=True
+)
+def show_full_bt_info(show_full_bt, full_bt_info):
+    if full_bt_info is None:
+        return "No backtrace info available."
+    if show_full_bt is None or len(show_full_bt) == 0:
+        return full_bt_info[0]
+    else:
+        return full_bt_info[0] + '\n' + full_bt_info[1]
+
+@callback(
+    Output({'type': 'config_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    Output({'type': 'config_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    Output({'type': 'dummy-loading-param', 'fig_id': MATCH}, 'children', allow_duplicate=True),
+    Input({'type': 'config_params_selector', 'fig_id': MATCH}, 'value'),
+    State({'type': 'config_value', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    State({'type': 'config_value_sum', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    prevent_initial_call=True
+)
+def show_or_hide_config_params(config_selector, config_values, config_values_sum):
+    patches = []
+    for _ in range(len(config_values)):
+        patch = Patch()
+        if config_selector is None or len(config_selector) == 0:
+            patch['display'] = 'none'
+        else:
+            patch['display'] = 'block'
+        patches.append(patch)
+    patches_sum = []
+    for _ in range(len(config_values_sum)):
+        patch = Patch()
+        if config_selector is None or len(config_selector) == 0:
+            patch['display'] = 'none'
+        else:
+            patch['display'] = 'list-item'
+        patches_sum.append(patch)
+    return patches, patches_sum,  str(np.random.random(1)[0])
+
+@callback(
+    Output({'type': 'modified_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    Output({'type': 'modified_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    Output({'type': 'dummy-loading-param', 'fig_id': MATCH}, 'children', allow_duplicate=True),
+    Input({'type': 'overwrite_params_selector', 'fig_id': MATCH}, 'value'),
+    State({'type': 'modified_value', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    State({'type': 'modified_value_sum', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    prevent_initial_call=True
+)
+def show_or_hide_overwrite_params(config_selector, config_values, config_values_sum):
+    patches = []
+    for _ in range(len(config_values)):
+        patch = Patch()
+        if config_selector is None or len(config_selector) == 0:
+            patch['display'] = 'none'
+        else:
+            patch['display'] = 'block'
+        patches.append(patch)
+    patches_sum = []
+    for _ in range(len(config_values_sum)):
+        patch = Patch()
+        if config_selector is None or len(config_selector) == 0:
+            patch['display'] = 'none'
+        else:
+            patch['display'] = 'list-item'
+        patches_sum.append(patch)
+    return patches, patches_sum, str(np.random.random(1)[0])
+
+@callback(
+    Output({'type': 'default_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    Output({'type': 'default_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    Output({'type': 'dummy-loading-param', 'fig_id': MATCH}, 'children', allow_duplicate=True),
+    Input({'type': 'default_params_selector', 'fig_id': MATCH}, 'value'),
+    State({'type': 'default_value', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    State({'type': 'default_value_sum', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    prevent_initial_call=True
+)
+def show_or_hide_default_params(config_selector, config_values, config_values_sum):
+    patches = []
+    for _ in range(len(config_values)):
+        patch = Patch()
+        if config_selector is None or len(config_selector) == 0:
+            patch['display'] = 'none'
+        else:
+            patch['display'] = 'block'
+        patches.append(patch)
+    patches_sum = []
+    for _ in range(len(config_values_sum)):
+        patch = Patch()
+        if config_selector is None or len(config_selector) == 0:
+            patch['display'] = 'none'
+        else:
+            patch['display'] = 'list-item'
+        patches_sum.append(patch)
+    return patches, patches_sum, str(np.random.random(1)[0])
 
 # Run the app
 if __name__ == '__main__':
