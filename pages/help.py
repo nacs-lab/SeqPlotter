@@ -11,5 +11,5 @@ with open(file_path, 'r') as file:
 
 layout = dbc.Container([
     html.Div('Documentation', className='text-center display-4'),
-    dcc.Markdown(file_content, className='mt-4'),
+    dcc.Markdown(file_content, className='mt-4', dangerously_allow_html=True),
 ])

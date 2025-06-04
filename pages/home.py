@@ -1,6 +1,6 @@
 # Import packages
 import dash
-from dash import Dash, html, dcc, callback, Input, Output, State, Patch, ALL, MATCH, ctx, no_update
+from dash import Dash, html, dcc, callback, Input, Output, State, Patch, ALL, MATCH, ctx, no_update, clientside_callback, ClientsideFunction
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
@@ -28,7 +28,7 @@ def dict_to_dash_elem(d, spacing=0, id=0, fig_id=0):
     indent_str = str(int(indent)) + 'px'
     colors = []
     for key, value in d.items():
-        if isinstance(value, dict) and ('value' not in value):
+        if isinstance(value, dict) and (('value' not in value) or ('type' not in value)):
             elem, id, int_colors = dict_to_dash_elem(value, spacing + 1, id, fig_id)
             color = None
             if "red" in int_colors:
@@ -580,86 +580,72 @@ def show_full_bt_info(show_full_bt, full_bt_info):
     else:
         return full_bt_info[0] + '\n' + full_bt_info[1]
 
-@callback(
+clientside_callback(
+    ClientsideFunction(
+        namespace='clientside',
+        function_name='update_param_display'
+    ),
     Output({'type': 'config_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
     Output({'type': 'config_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
     Output({'type': 'dummy-loading-param', 'fig_id': MATCH}, 'children', allow_duplicate=True),
     Input({'type': 'config_params_selector', 'fig_id': MATCH}, 'value'),
-    State({'type': 'config_value', 'index': ALL, 'fig_id': MATCH}, 'children'),
-    State({'type': 'config_value_sum', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    State({'type': 'config_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    State({'type': 'config_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
     prevent_initial_call=True
 )
-def show_or_hide_config_params(config_selector, config_values, config_values_sum):
-    patches = []
-    for _ in range(len(config_values)):
-        patch = Patch()
-        if config_selector is None or len(config_selector) == 0:
-            patch['display'] = 'none'
-        else:
-            patch['display'] = 'block'
-        patches.append(patch)
-    patches_sum = []
-    for _ in range(len(config_values_sum)):
-        patch = Patch()
-        if config_selector is None or len(config_selector) == 0:
-            patch['display'] = 'none'
-        else:
-            patch['display'] = 'list-item'
-        patches_sum.append(patch)
-    return patches, patches_sum,  str(np.random.random(1)[0])
 
-@callback(
+# @callback(
+#     Output({'type': 'config_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
+#     Output({'type': 'config_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
+#     Output({'type': 'dummy-loading-param', 'fig_id': MATCH}, 'children', allow_duplicate=True),
+#     Input({'type': 'config_params_selector', 'fig_id': MATCH}, 'value'),
+#     State({'type': 'config_value', 'index': ALL, 'fig_id': MATCH}, 'children'),
+#     State({'type': 'config_value_sum', 'index': ALL, 'fig_id': MATCH}, 'children'),
+#     prevent_initial_call=True
+# )
+# def show_or_hide_config_params(config_selector, config_values, config_values_sum):
+#     patches = []
+#     for _ in range(len(config_values)):
+#         patch = Patch()
+#         if config_selector is None or len(config_selector) == 0:
+#             patch['display'] = 'none'
+#         else:
+#             patch['display'] = 'block'
+#         patches.append(patch)
+#     patches_sum = []
+#     for _ in range(len(config_values_sum)):
+#         patch = Patch()
+#         if config_selector is None or len(config_selector) == 0:
+#             patch['display'] = 'none'
+#         else:
+#             patch['display'] = 'list-item'
+#         patches_sum.append(patch)
+#     return patches, patches_sum,  str(np.random.random(1)[0])
+
+clientside_callback(
+    ClientsideFunction(
+        namespace='clientside',
+        function_name='update_param_display'
+    ),
     Output({'type': 'modified_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
     Output({'type': 'modified_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
     Output({'type': 'dummy-loading-param', 'fig_id': MATCH}, 'children', allow_duplicate=True),
     Input({'type': 'overwrite_params_selector', 'fig_id': MATCH}, 'value'),
-    State({'type': 'modified_value', 'index': ALL, 'fig_id': MATCH}, 'children'),
-    State({'type': 'modified_value_sum', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    State({'type': 'modified_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    State({'type': 'modified_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
     prevent_initial_call=True
 )
-def show_or_hide_overwrite_params(config_selector, config_values, config_values_sum):
-    patches = []
-    for _ in range(len(config_values)):
-        patch = Patch()
-        if config_selector is None or len(config_selector) == 0:
-            patch['display'] = 'none'
-        else:
-            patch['display'] = 'block'
-        patches.append(patch)
-    patches_sum = []
-    for _ in range(len(config_values_sum)):
-        patch = Patch()
-        if config_selector is None or len(config_selector) == 0:
-            patch['display'] = 'none'
-        else:
-            patch['display'] = 'list-item'
-        patches_sum.append(patch)
-    return patches, patches_sum, str(np.random.random(1)[0])
 
-@callback(
+clientside_callback(
+    ClientsideFunction(
+        namespace='clientside',
+        function_name='update_param_display'
+    ),
     Output({'type': 'default_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
     Output({'type': 'default_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
     Output({'type': 'dummy-loading-param', 'fig_id': MATCH}, 'children', allow_duplicate=True),
     Input({'type': 'default_params_selector', 'fig_id': MATCH}, 'value'),
-    State({'type': 'default_value', 'index': ALL, 'fig_id': MATCH}, 'children'),
-    State({'type': 'default_value_sum', 'index': ALL, 'fig_id': MATCH}, 'children'),
+    State({'type': 'default_value', 'index': ALL, 'fig_id': MATCH}, 'style'),
+    State({'type': 'default_value_sum', 'index': ALL, 'fig_id': MATCH}, 'style'),
     prevent_initial_call=True
 )
-def show_or_hide_default_params(config_selector, config_values, config_values_sum):
-    patches = []
-    for _ in range(len(config_values)):
-        patch = Patch()
-        if config_selector is None or len(config_selector) == 0:
-            patch['display'] = 'none'
-        else:
-            patch['display'] = 'block'
-        patches.append(patch)
-    patches_sum = []
-    for _ in range(len(config_values_sum)):
-        patch = Patch()
-        if config_selector is None or len(config_selector) == 0:
-            patch['display'] = 'none'
-        else:
-            patch['display'] = 'list-item'
-        patches_sum.append(patch)
-    return patches, patches_sum, str(np.random.random(1)[0])
