@@ -3,3 +3,4 @@ numpy
 pandas
 plotly
 dash-bootstrap-components
+waitress
