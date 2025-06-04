@@ -1,0 +1,11 @@
+.plot-block {
+    height: 8rem;
+    display: block;
+}
+
+@media(max-width: 400px) {
+    .plot-block{
+        display: 2rem;
+    }
+}
+
