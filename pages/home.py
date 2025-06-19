@@ -11,8 +11,15 @@ import plotly.graph_objs as go
 import dash_bootstrap_components as dbc
 import json
 from pathlib import Path
+from datetime import datetime
+from flask import request
+import os
 
 dash.register_page(__name__, path='/')
+
+data_dir = './data/'
+
+app = dash.get_app()
 
 def get_latest_file(directory, extension):
     path = Path(directory)
@@ -292,6 +299,34 @@ def create_new_block(id_num, chn_names, title, seq_name, params):
         dcc.Store(id={'type': 'seq_name', 'index': id_num}, data=seq_name, storage_type='memory')
     ]
 
+delete_files_modal = html.Div(
+    [
+        dbc.Modal(
+            [
+                dbc.ModalHeader(dbc.ModalTitle("Delete Files")),
+                # dbc.Row([
+                #         dbc.Col([html.Div('Profiles loaded from ' + profile_dir, className='h-100 w-100 text-wrap text-center mb-2')])
+                #     ]),
+                dbc.ModalBody([
+                    dcc.Dropdown(
+                        id='delete-file-selector',
+                        options=[],
+                        placeholder="Files to delete",
+                        multi=True,
+                        className='mb-2'
+                    ),
+                ]),
+                dbc.ModalFooter([
+                    dbc.Button("Delete", id='delete-files', n_clicks=0, color='danger'),
+                    dbc.Button("Cancel", id='cancel-delete-files', n_clicks=0)
+                ]),
+            ],
+            id="delete-files-dialog",
+            is_open=False,
+        ),
+    ]
+)
+
 
 add_figure_elem = [dbc.Col(dcc.Dropdown(
             id='sequence_selector',
@@ -322,12 +357,12 @@ file_uploader = dcc.Upload(
     )
 
 uploaded_file = html.Div()
-latest_file_uploader = dbc.Row([
-    dbc.Col([
-        dbc.Input(id='file_upload_path', placeholder='Enter path', type='text', value='', className='mt-2')]
-    , width=8),
-    dbc.Col([dbc.Button('Load Latest File', id='load-latest-file-btn', n_clicks=0, className='d-flex align-items-center mt-2')], width=2)
-])
+# latest_file_uploader = dbc.Row([
+#     dbc.Col([
+#         dbc.Input(id='file_upload_path', placeholder='Enter path', type='text', value='', className='mt-2')]
+#     , width=8),
+#     dbc.Col([dbc.Button('Load Latest File', id='load-latest-file-btn', n_clicks=0, className='d-flex align-items-center mt-2')], width=2)
+# ])
 seq_cache = dcc.Store(id='seq_cache', storage_type='memory')
 figs_container = dcc.Tabs(id='figs-container', value='', children=[])
 #reset_block_signal = dcc.Store(id='reset_block_signal', data=0, storage_type='memory') # Used to reset blocks
@@ -348,11 +383,92 @@ layout = dbc.Container([
     dbc.Row([html.P("Drag and drop a .seq file into the below dotted box or enter a path to load in the latest .seq file from a directory. The box can also be clicked to choose a file.",className='text-body my-2')]),
     dbc.Row([file_uploader]),
     dbc.Row([uploaded_file]),
-    latest_file_uploader,
+    dbc.Row([dbc.Col(dcc.Dropdown(
+            id='seq_selector',
+            options=[],
+            placeholder="Select a file"
+        ), width = 8), dbc.Col([dbc.Button('Load Latest File', id='load-latest-file-btn', n_clicks=0, className='d-flex align-items-center mt-2')], width=2),
+        dbc.Col([dbc.Button('Delete Files', id='delete-files-btn', n_clicks=0, className='d-flex align-items-center mt-2')], width=2)]),
+    # latest_file_uploader,
     dbc.Row(add_figure_elem),
     dbc.Row(dbc.Col(html.Div([figs_container], style={"height": "100vh", "overflowY": "auto"}))),
+    delete_files_modal,
+    dcc.Interval(id='page-load', interval=100, n_intervals=0, max_intervals=0),
+    dcc.Interval(id='seq_selection_updater', interval=1000, n_intervals=0),
     seq_cache
 ], fluid=True)
+
+@callback(
+    Output('delete-files-dialog', 'is_open', allow_duplicate=True),
+    Output('delete-file-selector', 'options'),
+    Input("delete-files-btn", 'n_clicks'),
+    Input('cancel-delete-files', 'n_clicks'),
+    State('uuid', 'data'),
+    prevent_initial_call = True
+)
+def open_delete_files_modal(open_btn, cancel_btn, uuid):
+    triggered_id = ctx.triggered_id
+    if (triggered_id == 'cancel-delete-files'):
+        return 0, no_update
+    elif (triggered_id == 'delete-files-btn'):
+        dir_name = data_dir + str(uuid) + '/'
+        dir_path = Path(dir_name)
+        seq_files = list(dir_path.glob("*.seq"))
+        seq_strings = [str(file.name) for file in seq_files]
+        return 1, seq_strings
+    else:
+        return no_update, no_update, no_update
+    
+@callback(
+    Output('delete-files-dialog', 'is_open', allow_duplicate=True),
+    Input('delete-files', 'n_clicks'),
+    State('delete-file-selector', 'value'),
+    State('uuid', 'data'),
+    prevent_initial_call = True
+)
+def delete_files(n_clicks, files_to_delete, uuid):
+    if n_clicks > 0 and files_to_delete is not None and len(files_to_delete) > 0:
+        dir_name = data_dir + str(uuid) + '/'
+        for fname in files_to_delete:
+            fullpath = os.path.join(dir_name, fname)
+            if os.path.exists(fullpath):
+                os.remove(fullpath)
+        return 0
+    return no_update
+
+@app.server.route('/upload', methods=['POST'])
+def upload_binary():
+    binary_data = request.get_data()
+    print(f"Received {len(binary_data)} bytes")
+    # Strip off filename
+    split_array = binary_data.split(b'\x00', 1)
+    fname = split_array[0].decode('utf-8')
+    # Strip off uuid
+    split_array2 = split_array[1].split(b'\x00', 1)
+    uuid = split_array2[0].decode('utf-8')
+    decoded_bytes = split_array2[1]
+    dir_name = data_dir + str(uuid)
+    current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if not os.path.exists(dir_name):
+        os.makedirs(dir_name)
+    save_fname = current_time + '_' + fname
+    fullpath = os.path.join(dir_name, save_fname)
+    with open(fullpath, 'wb') as f:
+        f.write(decoded_bytes)
+    return "Received", 200
+
+@callback(
+    Output('seq_selector', 'options'),
+    Input('seq_selection_updater', 'n_intervals'),
+    State('uuid', 'data')
+)
+def update_seq_selector_options(n, uuid):
+    if uuid is not None:
+        dir_path = Path(data_dir + str(uuid) + '/')
+        seq_files = list(dir_path.glob("*.seq"))
+        seq_strings = [str(file.name) for file in seq_files]
+        return seq_strings
+    return no_update
 
 @callback(
     Output(figs_container, 'children', allow_duplicate=True),
@@ -401,12 +517,14 @@ def add_figure(n_clicks, seq_name, data):
     Output({'type': 'add_bt_info', 'index': ALL}, 'data', allow_duplicate=True),
     Input(file_uploader, 'contents'),   
     Input(file_uploader, 'filename'),
+    Input('seq_selector', 'value'),
     Input('load-latest-file-btn', 'n_clicks'),
-    State('file_upload_path', 'value'),
+    # State('file_upload_path', 'value'),
     State(figs_container, 'children'),
+    State('uuid', 'data'),
     prevent_initial_call=True
 )
-def upload_file(contents, filename, n_clicks, file_path, cur_figs):
+def upload_file(contents, filename, seq_selector_name, n_clicks, cur_figs, uuid):
     nfigs = len(cur_figs)
     none_array = [None for _ in range(nfigs)]
     triggered_id = ctx.triggered_id
@@ -417,9 +535,25 @@ def upload_file(contents, filename, n_clicks, file_path, cur_figs):
         content_type, content_string = contents.split(',')
         decoded_bytes = base64.b64decode(content_string)
         res = process_data(decoded_bytes)
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
         #print(decoded_bytes)
+        # Save
+        dir_name = data_dir + str(uuid)
+        if not os.path.exists(dir_name):
+            os.makedirs(dir_name)
+        save_fname = current_time + '_' + filename
+        fullpath = os.path.join(dir_name, save_fname)
+        with open(fullpath, 'wb') as f:
+            f.write(decoded_bytes)
         return res, "Uploaded: " + filename, [], none_array, none_array, none_array
-    if triggered_id == 'load-latest-file-btn':
+    elif triggered_id == 'seq_selector':
+        fname = data_dir + str(uuid) + '/' + seq_selector_name
+        with open(fname, 'rb') as f:
+            bytes_data = f.read()
+        res = process_data(bytes_data)
+        return res, "Loaded file: " + fname, [], none_array, none_array, none_array
+    elif triggered_id == 'load-latest-file-btn':
+        file_path = data_dir + str(uuid) + '/'
         fullpath = get_latest_file(file_path, 'seq')
         if fullpath is None:
             return None, "No file with extension .seq found in the specified directory.", no_update, no_update, no_update, no_update

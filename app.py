@@ -1,6 +1,6 @@
 # Import packages
 import dash
-from dash import Dash, html, dcc, callback, Input, Output, State, Patch, ALL, MATCH, ctx, no_update
+from dash import Dash, html, dcc, callback, Input, Output, State, Patch, ALL, MATCH, ctx, no_update, clientside_callback, ClientsideFunction
 from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
@@ -21,8 +21,32 @@ app.layout = dbc.Container([
              dbc.NavItem(dbc.NavLink("Help", active='exact', href="/help")),
     ], pills=True, fill=True, justified=True)], width={'size': 4, 'offset': 4})]),
     html.Hr(className="my-4 mx-auto w-75 border border-2 border-secondary"),
-    dash.page_container
+    html.Div(id ='uuid-display', children='', className='text-center display-6 mb-2'),
+    dash.page_container,
+    dcc.Interval(id='get-uuid', interval=1, n_intervals=0, max_intervals=0),
+    dcc.Store(id='uuid', storage_type='local')
 ], fluid=True)
+
+clientside_callback(
+    ClientsideFunction(
+        namespace='clientside',
+        function_name='get_uuid'
+    ),
+    Output('uuid', 'data'),
+    Input('get-uuid', 'n_intervals'),
+    State('uuid', 'data')
+)
+
+clientside_callback(
+    ClientsideFunction(
+        namespace='clientside',
+        function_name='display_uuid'
+    ),
+    Output('uuid-display', 'children'),
+    Input('page-load', 'n_intervals'),
+    State('uuid', 'data')
+)
+
 # Run the app
 if __name__ == '__main__':
     app.run(debug=True)
