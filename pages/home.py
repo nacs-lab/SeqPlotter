@@ -1,3 +1,6 @@
+# TODO: Add some stuff to create_default_figure to plot old data
+# TODO: Keep track of previous channels used
+
 # Import packages
 import dash
 from dash import Dash, html, dcc, callback, Input, Output, State, Patch, ALL, MATCH, ctx, no_update, clientside_callback, ClientsideFunction
@@ -14,6 +17,7 @@ from pathlib import Path
 from datetime import datetime
 from flask import request
 import os
+import yaml
 
 dash.register_page(__name__, path='/')
 
@@ -254,7 +258,7 @@ def create_default_figure(title = ''):
                          showlegend=False))
     return default_figure
 
-def create_new_block(id_num, chn_names, title, seq_name, params):
+def create_new_block(id_num, chn_names, title, seq_name, params, chn_selector_values=[]):
     """Create a new block with a figure and channel selector."""
     if params:
         param_elem, _, _ = dict_to_dash_elem(params, 0, 0, id_num)
@@ -264,6 +268,7 @@ def create_new_block(id_num, chn_names, title, seq_name, params):
         dcc.Dropdown(
             id={'type': 'chn_selector', 'index': id_num},
             options=[name for name in chn_names],
+            value=chn_selector_values,
             placeholder="Select a channel",
             multi=True
         ),
@@ -395,7 +400,9 @@ layout = dbc.Container([
     delete_files_modal,
     dcc.Interval(id='page-load', interval=100, n_intervals=0, max_intervals=0),
     dcc.Interval(id='seq_selection_updater', interval=1000, n_intervals=0),
-    seq_cache
+    dcc.Interval(id='data_cache_updater', interval=1000, n_intervals=0),
+    seq_cache,
+    dcc.Store(id='data_cache', storage_type='memory') # For storing the current filename, sequences plotted and channels on each plot.
 ], fluid=True)
 
 @callback(
@@ -471,6 +478,24 @@ def update_seq_selector_options(n, uuid):
     return no_update
 
 @callback(
+    Input('data_cache_updater', 'n_intervals'),
+    State('data_cache', 'data'),
+    State({'type': 'chns_storage', 'index': ALL}, 'data'),
+    State({'type': 'seq_name', 'index': ALL}, 'data'),
+    State('uuid', 'data')
+)
+def update_data_cache(n, data, chns_storage, seq_names, uuid):
+    if data is not None:
+        fname = data['filename'].split('.')[0] + '.opt'
+        dir_name = data_dir + str(uuid) + '/'
+        res = dict()
+        res['channels'] = chns_storage
+        res['seq_names'] = seq_names
+        full_fname = os.path.join(dir_name, fname)
+        with open(full_fname, 'w') as f:
+            yaml.dump(res, f)
+
+@callback(
     Output(figs_container, 'children', allow_duplicate=True),
     Output(figs_container, 'value'),
     Input('add-figure-btn', 'n_clicks'),
@@ -512,9 +537,10 @@ def add_figure(n_clicks, seq_name, data):
     Output(seq_cache, 'data'),
     Output(uploaded_file, 'children'),
     Output(figs_container, 'children', allow_duplicate=True),
-    Output({'type': 'chns_storage', 'index': ALL}, 'data', allow_duplicate=True),
-    Output({'type': 'seq_name', 'index': ALL}, 'data'),
-    Output({'type': 'add_bt_info', 'index': ALL}, 'data', allow_duplicate=True),
+    # Output({'type': 'chns_storage', 'index': ALL}, 'data', allow_duplicate=True),
+    # Output({'type': 'seq_name', 'index': ALL}, 'data'),
+    # Output({'type': 'add_bt_info', 'index': ALL}, 'data', allow_duplicate=True),
+    Output('data_cache', 'data'),
     Input(file_uploader, 'contents'),   
     Input(file_uploader, 'filename'),
     Input('seq_selector', 'value'),
@@ -526,11 +552,11 @@ def add_figure(n_clicks, seq_name, data):
 )
 def upload_file(contents, filename, seq_selector_name, n_clicks, cur_figs, uuid):
     nfigs = len(cur_figs)
-    none_array = [None for _ in range(nfigs)]
+    # none_array = [None for _ in range(nfigs)]
     triggered_id = ctx.triggered_id
     if triggered_id == 'upload-data':
         if contents is None:
-            return None, "Please upload a file.", no_update, no_update, no_update, no_update
+            return None, "Please upload a file.", no_update, no_update
         # strip off the prefix
         content_type, content_string = contents.split(',')
         decoded_bytes = base64.b64decode(content_string)
@@ -545,24 +571,46 @@ def upload_file(contents, filename, seq_selector_name, n_clicks, cur_figs, uuid)
         fullpath = os.path.join(dir_name, save_fname)
         with open(fullpath, 'wb') as f:
             f.write(decoded_bytes)
-        return res, "Uploaded: " + filename, [], none_array, none_array, none_array
+        data_cache = dict()
+        data_cache['filename'] = save_fname
+        return res, "Uploaded: " + filename, [], data_cache
     elif triggered_id == 'seq_selector':
         fname = data_dir + str(uuid) + '/' + seq_selector_name
         with open(fname, 'rb') as f:
             bytes_data = f.read()
         res = process_data(bytes_data)
-        return res, "Loaded file: " + fname, [], none_array, none_array, none_array
+        data_cache = dict()
+        data_cache['filename'] = seq_selector_name
+        fig_children = []
+        opt_file_path = fname.split('/')[-1].split('.')[0] + '.opt'
+        opt_file_path = os.path.join(data_dir + str(uuid), opt_file_path)
+        if os.path.isfile(opt_file_path):
+            with open(opt_file_path, 'r') as f:
+                opt_data = yaml.safe_load(f)
+            if opt_data is not None:
+                for idx, seq_name in enumerate(opt_data['seq_names']):
+                    n_clicks = idx + 1
+                    seq_info = res[0][seq_name]
+                    nchns = len(seq_info['outputs'])
+                    chn_names = [seq_info['outputs'][i]["name"] for i in range(nchns)]
+                    fig_id = f'{seq_name}_{n_clicks}'
+                    params = seq_info['params']
+                    block = create_new_block(n_clicks, chn_names, seq_name, seq_name, params, chn_selector_values=opt_data['channels'][idx])
+                    fig_children.append(dcc.Tab(label=seq_name, id={'type': 'fig_tab', 'index': n_clicks, 'seq': seq_name}, value=fig_id, children=block))
+        return res, "Loaded file: " + fname, fig_children, data_cache
     elif triggered_id == 'load-latest-file-btn':
         file_path = data_dir + str(uuid) + '/'
         fullpath = get_latest_file(file_path, 'seq')
         if fullpath is None:
-            return None, "No file with extension .seq found in the specified directory.", no_update, no_update, no_update, no_update
+            return None, "No file with extension .seq found in the specified directory.", no_update, no_update
         fullpath = str(fullpath)
         with open(fullpath, 'rb') as f:
             bytes_data = f.read()
         res = process_data(bytes_data)
-        return res, "Loaded latest file: " + fullpath, [], none_array, none_array, none_array
-    return None, "Please upload a file.", no_update, no_update, no_update, no_update
+        data_cache = dict()
+        data_cache['filename'] = fullpath.split('/')[-1]
+        return res, "Loaded latest file: " + fullpath, [], data_cache
+    return None, "Please upload a file.", no_update, no_update
 
 @callback(
     Output('sequence_selector', 'options'),

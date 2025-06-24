@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 # Initialize the app
-app = Dash(title='Seq Plotter', prevent_initial_callbacks="initial_duplicate", external_stylesheets=[dbc.themes.BOOTSTRAP], use_pages=True)
+app = Dash(title='Seq Plotter',  update_title=None, prevent_initial_callbacks="initial_duplicate", external_stylesheets=[dbc.themes.BOOTSTRAP], use_pages=True)
 
 app.layout = dbc.Container([
     dbc.Row([html.Div('Sequence Plotter', className='text-center display-3 fw-bold mb-4')]),
